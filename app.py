@@ -14,7 +14,7 @@ SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET")
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 
 app = FastAPI()
-feedback_store = []
+FEEDBACK_FILE = "feedback.json"
 user_feedback_state = {}  # Store rating/comments per user
 
 # ---------------------------
@@ -24,6 +24,7 @@ def verify_slack_request(request: Request, body: str):
     timestamp = request.headers.get("X-Slack-Request-Timestamp")
     slack_signature = request.headers.get("X-Slack-Signature")
     if abs(time.time() - int(timestamp)) > 60 * 5:
+        print("❌ Timestamp too old!")
         return False
     sig_basestring = f"v0:{timestamp}:{body}"
     my_signature = "v0=" + hmac.new(
@@ -31,6 +32,7 @@ def verify_slack_request(request: Request, body: str):
         sig_basestring.encode(),
         hashlib.sha256
     ).hexdigest()
+    print(f"🔍 Calculated Signature: {my_signature}")
     return hmac.compare_digest(my_signature, slack_signature)
 
 # ---------------------------
@@ -41,6 +43,7 @@ def get_user_name(user_id):
     headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
     params = {"user": user_id}
     resp = requests.get(url, headers=headers, params=params).json()
+    print(f"✅ Fetched user name for {user_id}: {resp}")
     return resp.get("user", {}).get("real_name", "Unknown")
 
 def get_channel_name(channel_id):
@@ -48,7 +51,29 @@ def get_channel_name(channel_id):
     headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
     params = {"channel": channel_id}
     resp = requests.get(url, headers=headers, params=params).json()
+    print(f"✅ Fetched channel name for {channel_id}: {resp}")
     return resp.get("channel", {}).get("name", "Unknown")
+
+def send_slack_message(url, payload):
+    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"}
+    resp = requests.post(url, headers=headers, json=payload)
+    print(f"✅ Slack API Response: {resp.status_code}, {resp.text}")
+
+# ---------------------------
+# Feedback persistence
+# ---------------------------
+def load_feedback():
+    if os.path.exists(FEEDBACK_FILE):
+        with open(FEEDBACK_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+def save_feedback(data):
+    feedback = load_feedback()
+    feedback.append(data)
+    with open(FEEDBACK_FILE, "w") as f:
+        json.dump(feedback, f)
+    print(f"✅ Feedback saved to {FEEDBACK_FILE}: {data}")
 
 # ---------------------------
 # Feedback endpoints
@@ -56,13 +81,15 @@ def get_channel_name(channel_id):
 @app.post("/feedback")
 async def receive_feedback(request: Request):
     data = await request.json()
-    feedback_store.append(data)
+    save_feedback(data)
     print("✅ Feedback stored:", data)
     return {"status": "success", "received": data}
 
 @app.get("/feedback")
 async def get_feedback():
-    return {"feedback": feedback_store}
+    feedback = load_feedback()
+    print(f"✅ Returning feedback list: {feedback}")
+    return {"feedback": feedback}
 
 # ---------------------------
 # Slack Events endpoint
@@ -76,19 +103,15 @@ async def slack_events(request: Request):
         return {"error": "invalid signature"}
 
     data = json.loads(body_str)
-    print("🔍 Full Slack Event Payload:", json.dumps(data, indent=2))  # Print entire payload
+    print("🔍 Full Slack Event Payload:", json.dumps(data, indent=2))
+
     if data.get("type") == "url_verification":
         print("✅ URL verification challenge received.")
         return {"challenge": data["challenge"]}
 
     if data.get("type") == "event_callback":
         event = data.get("event", {})
-        print("✅ Event Type:", event.get("type"))
-        print("✅ Message Text:", event.get("text"))
-        print("✅ Channel ID:", event.get("channel"))
-        print("✅ User ID:", event.get("user"))
-        print("✅ Thread TS:", event.get("thread_ts", event.get("ts")))
-
+        print(f"✅ Event Type: {event.get('type')}, Text: {event.get('text')}")
         if event.get("type") == "message" and "subtype" not in event:
             user_text = event.get("text", "")
             channel_id = event.get("channel", "")
@@ -105,7 +128,6 @@ async def slack_events(request: Request):
 # ---------------------------
 def send_yes_button(channel, thread_ts):
     url = "https://slack.com/api/chat.postMessage"
-    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"}
     payload = {
         "channel": channel,
         "thread_ts": thread_ts,
@@ -123,14 +145,14 @@ def send_yes_button(channel, thread_ts):
             }
         ]
     }
-    requests.post(url, headers=headers, json=payload)
+    print(f"✅ Sending Yes button to channel {channel}, thread {thread_ts}")
+    send_slack_message(url, payload)
 
 # ---------------------------
 # Send form message
 # ---------------------------
 def send_feedback_form(channel, thread_ts):
     url = "https://slack.com/api/chat.postMessage"
-    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"}
     payload = {
         "channel": channel,
         "thread_ts": thread_ts,
@@ -170,7 +192,37 @@ def send_feedback_form(channel, thread_ts):
             }
         ]
     }
-    requests.post(url, headers=headers, json=payload)
+    print(f"✅ Sending feedback form to channel {channel}, thread {thread_ts}")
+    send_slack_message(url, payload)
+
+# ---------------------------
+# Update form & thank you
+# ---------------------------
+def update_feedback_form(channel, ts):
+    url = "https://slack.com/api/chat.update"
+    payload = {
+        "channel": channel,
+        "ts": ts,
+        "text": "Feedback submitted ✅",
+        "blocks": [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "Thank you! Your feedback has been recorded."}
+            }
+        ]
+    }
+    print(f"✅ Updating feedback form for channel {channel}, ts {ts}")
+    send_slack_message(url, payload)
+
+def send_thank_you(channel, thread_ts):
+    url = "https://slack.com/api/chat.postMessage"
+    payload = {
+        "channel": channel,
+        "thread_ts": thread_ts,
+        "text": "✅ Thank you for your feedback!"
+    }
+    print(f"✅ Sending thank-you message to channel {channel}, thread {thread_ts}")
+    send_slack_message(url, payload)
 
 # ---------------------------
 # Interactivity endpoint
@@ -178,9 +230,9 @@ def send_feedback_form(channel, thread_ts):
 @app.post("/slack/interactivity")
 async def slack_interactivity(request: Request):
     try:
-        print("tring the interactivity")
+        print("✅ Received interactivity request")
         form_data = await request.form()
-        print("form: ",form_data)
+        print("🔍 Raw form data:", form_data)
         payload = form_data.get("payload")
         if not payload:
             print("❌ No payload found in request.")
@@ -193,17 +245,12 @@ async def slack_interactivity(request: Request):
             action_id = data["actions"][0].get("action_id")
             print(f"✅ Action ID: {action_id}")
 
-            # Handle Yes button click
             if action_id == "show_feedback_form":
                 channel_id = data.get("channel", {}).get("id")
                 thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
-                if not channel_id or not thread_ts:
-                    print("❌ Missing channel_id or thread_ts in payload:", data)
-                    return {"text": "Error: Missing context"}
                 print(f"✅ Yes button clicked. Channel: {channel_id}, Thread TS: {thread_ts}")
                 send_feedback_form(channel_id, thread_ts)
 
-            # Handle rating selection
             elif action_id == "rating_select":
                 user_id = data.get("user", {}).get("id")
                 rating = data["actions"][0].get("selected_option", {}).get("value")
@@ -212,7 +259,6 @@ async def slack_interactivity(request: Request):
                     user_feedback_state[user_id]["rating"] = rating
                     print(f"✅ Rating selected: {rating}")
 
-            # Handle feedback text input
             elif action_id == "feedback_text":
                 user_id = data.get("user", {}).get("id")
                 feedback_text = data["actions"][0].get("value", "")
@@ -221,17 +267,23 @@ async def slack_interactivity(request: Request):
                     user_feedback_state[user_id]["comments"] = feedback_text
                     print(f"✅ Feedback text entered: {feedback_text}")
 
-            # Handle submit button
             elif action_id == "submit_feedback":
                 user_id = data.get("user", {}).get("id")
                 channel_id = data.get("channel", {}).get("id")
                 thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
                 state = user_feedback_state.get(user_id, {})
+
+                if state.get("submitted"):
+                    print("❌ Duplicate submission detected!")
+                    return {"text": "You have already submitted feedback for this thread."}
+
                 rating = state.get("rating")
                 comments = state.get("comments", "")
                 if not rating:
                     print("❌ Rating missing!")
                     return {"text": "Please select a rating before submitting."}
+
+                state["submitted"] = True
 
                 user_name = get_user_name(user_id)
                 channel_name = get_channel_name(channel_id)
@@ -249,8 +301,12 @@ async def slack_interactivity(request: Request):
                 }
                 print("✅ Final Feedback Data:", feedback_data)
 
-                # Post to deployed feedback endpoint
+                save_feedback(feedback_data)
                 requests.post("https://feedback-jeysakthi1140-p6js52a9.leapcell.dev/feedback", json=feedback_data)
+
+                update_feedback_form(channel_id, thread_ts)
+                send_thank_you(channel_id, thread_ts)
+
                 return {"text": "Thank you for your feedback!"}
 
         return {"status": "ok"}
@@ -258,6 +314,7 @@ async def slack_interactivity(request: Request):
     except Exception as e:
         print("❌ Exception in /slack/interactivity:", str(e))
         return {"error": "Internal Server Error"}
+
 # ---------------------------
 # Run FastAPI
 # ---------------------------
