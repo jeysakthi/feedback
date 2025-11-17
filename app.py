@@ -14,7 +14,7 @@ SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET")
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 
 app = FastAPI()
-FEEDBACK_FILE = "feedback.json"
+feedback_store = []  # In-memory feedback list
 user_feedback_state = {}  # Store rating/comments per user
 
 # ---------------------------
@@ -60,36 +60,19 @@ def send_slack_message(url, payload):
     print(f"✅ Slack API Response: {resp.status_code}, {resp.text}")
 
 # ---------------------------
-# Feedback persistence
-# ---------------------------
-def load_feedback():
-    if os.path.exists(FEEDBACK_FILE):
-        with open(FEEDBACK_FILE, "r") as f:
-            return json.load(f)
-    return []
-
-def save_feedback(data):
-    feedback = load_feedback()
-    feedback.append(data)
-    with open(FEEDBACK_FILE, "w") as f:
-        json.dump(feedback, f)
-    print(f"✅ Feedback saved to {FEEDBACK_FILE}: {data}")
-
-# ---------------------------
 # Feedback endpoints
 # ---------------------------
 @app.post("/feedback")
 async def receive_feedback(request: Request):
     data = await request.json()
-    save_feedback(data)
-    print("✅ Feedback stored:", data)
+    feedback_store.append(data)  # Store in memory only
+    print("✅ Feedback stored in memory:", data)
     return {"status": "success", "received": data}
 
 @app.get("/feedback")
 async def get_feedback():
-    feedback = load_feedback()
-    print(f"✅ Returning feedback list: {feedback}")
-    return {"feedback": feedback}
+    print(f"✅ Returning feedback list: {feedback_store}")
+    return {"feedback": feedback_store}
 
 # ---------------------------
 # Slack Events endpoint
@@ -301,7 +284,8 @@ async def slack_interactivity(request: Request):
                 }
                 print("✅ Final Feedback Data:", feedback_data)
 
-                save_feedback(feedback_data)
+                # Store in memory and send to external API
+                feedback_store.append(feedback_data)
                 requests.post("https://feedback-jeysakthi1140-p6js52a9.leapcell.dev/feedback", json=feedback_data)
 
                 update_feedback_form(channel_id, thread_ts)
