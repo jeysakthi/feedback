@@ -179,16 +179,11 @@ def send_feedback_form(channel, thread_ts):
 async def slack_interactivity(request: Request):
     form_data = await request.form()
     data = json.loads(form_data.get("payload"))
-    print("Interactivity Payload:", data)
-
-    user_id = data["user"]["id"]
-    channel_id = data["channel"]["id"]
-    # thread_ts = data["message"]["ts"]
-    thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
-
+    print("🔍 Interactivity Payload:", json.dumps(data, indent=2))
 
     if data.get("type") == "block_actions":
         action_id = data["actions"][0]["action_id"]
+        print(f"✅ Action ID: {action_id}")
 
         if action_id == "show_feedback_form":
             channel_id = data.get("channel", {}).get("id")
@@ -196,23 +191,34 @@ async def slack_interactivity(request: Request):
             if not channel_id or not thread_ts:
                 print("❌ Missing channel_id or thread_ts in payload:", data)
                 return {"text": "Error: Missing context"}
+            print(f"✅ Yes button clicked. Channel: {channel_id}, Thread TS: {thread_ts}")
             send_feedback_form(channel_id, thread_ts)
 
         elif action_id == "rating_select":
-            rating = data["actions"][0]["selected_option"]["value"]
-            user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
-            user_feedback_state[user_id]["rating"] = rating
+            user_id = data.get("user", {}).get("id")
+            rating = data["actions"][0].get("selected_option", {}).get("value")
+            if user_id and rating:
+                user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
+                user_feedback_state[user_id]["rating"] = rating
+                print(f"✅ Rating selected: {rating}")
 
         elif action_id == "feedback_text":
-            feedback_text = data["actions"][0]["value"]
-            user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
-            user_feedback_state[user_id]["comments"] = feedback_text
+            user_id = data.get("user", {}).get("id")
+            feedback_text = data["actions"][0].get("value", "")
+            if user_id:
+                user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
+                user_feedback_state[user_id]["comments"] = feedback_text
+                print(f"✅ Feedback text entered: {feedback_text}")
 
         elif action_id == "submit_feedback":
+            user_id = data.get("user", {}).get("id")
+            channel_id = data.get("channel", {}).get("id")
+            thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
             state = user_feedback_state.get(user_id, {})
             rating = state.get("rating")
             comments = state.get("comments", "")
             if not rating:
+                print("❌ Rating missing!")
                 return {"text": "Please select a rating before submitting."}
 
             user_name = get_user_name(user_id)
@@ -229,11 +235,13 @@ async def slack_interactivity(request: Request):
                 "comments": comments,
                 "timestamp": timestamp
             }
-            requests.post("ttps://feedback-jeysakthi1140-p6js52a9.leapcell.dev/feedback", json=feedback_data)
+            print("✅ Final Feedback Data:", feedback_data)
+
+            # Use your deployed URL here
+            requests.post("https://feedback-jeysakthi1140-p6js52a9.leapcell.dev/feedback", json=feedback_data)
             return {"text": "Thank you for your feedback!"}
 
     return {"status": "ok"}
-
 # ---------------------------
 # Run FastAPI
 # ---------------------------
