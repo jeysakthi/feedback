@@ -228,12 +228,14 @@ async def slack_interactivity(request: Request):
             state = user_feedback_state.get(user_id, {})
 
             if action_id == "show_feedback_form":
-                if state.get("submitted"):
-                    print("❌ User already submitted feedback, ignoring Yes click.")
-                    return {"text": "You have already submitted feedback for this thread."}
-
                 channel_id = data.get("channel", {}).get("id")
                 thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
+
+                # ✅ Check if user already submitted feedback for this thread
+                if thread_ts in state.get("submitted_threads", []):
+                    print("❌ User already submitted feedback for this thread.")
+                    return {"text": "You have already submitted feedback for this thread."}
+
                 user_name = get_user_name(user_id)
                 user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
                 user_feedback_state[user_id]["user_name"] = user_name
@@ -258,8 +260,8 @@ async def slack_interactivity(request: Request):
                 channel_id = data.get("channel", {}).get("id")
                 thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
 
-                if state.get("submitted"):
-                    print("❌ Duplicate submission detected!")
+                if thread_ts in state.get("submitted_threads", []):
+                    print("❌ Duplicate submission detected for this thread!")
                     return {"text": "You have already submitted feedback for this thread."}
 
                 rating = state.get("rating")
@@ -272,7 +274,9 @@ async def slack_interactivity(request: Request):
                     print("❌ Rating missing!")
                     return {"text": "Please select a rating before submitting."}
 
-                state["submitted"] = True
+                # ✅ Mark this thread as submitted
+                state.setdefault("submitted_threads", []).append(thread_ts)
+
                 user_name = state.get("user_name") or get_user_name(user_id)
                 channel_name = get_channel_name(channel_id)
                 timestamp = time.time()
