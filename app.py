@@ -72,20 +72,30 @@ async def slack_events(request: Request):
     body = await request.body()
     body_str = body.decode()
     if not verify_slack_request(request, body_str):
+        print("❌ Invalid Slack signature!")
         return {"error": "invalid signature"}
 
     data = json.loads(body_str)
+    print("🔍 Full Slack Event Payload:", json.dumps(data, indent=2))  # Print entire payload
     if data.get("type") == "url_verification":
+        print("✅ URL verification challenge received.")
         return {"challenge": data["challenge"]}
 
     if data.get("type") == "event_callback":
         event = data.get("event", {})
+        print("✅ Event Type:", event.get("type"))
+        print("✅ Message Text:", event.get("text"))
+        print("✅ Channel ID:", event.get("channel"))
+        print("✅ User ID:", event.get("user"))
+        print("✅ Thread TS:", event.get("thread_ts", event.get("ts")))
+
         if event.get("type") == "message" and "subtype" not in event:
             user_text = event.get("text", "")
             channel_id = event.get("channel", "")
             thread_ts = event.get("thread_ts", event.get("ts", ""))
 
             if "This issue is resolved" in user_text:
+                print("✅ Trigger phrase detected, sending Yes button...")
                 send_yes_button(channel_id, thread_ts)
 
     return {"status": "ok"}
@@ -173,12 +183,19 @@ async def slack_interactivity(request: Request):
 
     user_id = data["user"]["id"]
     channel_id = data["channel"]["id"]
-    thread_ts = data["message"]["ts"]
+    # thread_ts = data["message"]["ts"]
+    thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
+
 
     if data.get("type") == "block_actions":
         action_id = data["actions"][0]["action_id"]
 
         if action_id == "show_feedback_form":
+            channel_id = data.get("channel", {}).get("id")
+            thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
+            if not channel_id or not thread_ts:
+                print("❌ Missing channel_id or thread_ts in payload:", data)
+                return {"text": "Error: Missing context"}
             send_feedback_form(channel_id, thread_ts)
 
         elif action_id == "rating_select":
