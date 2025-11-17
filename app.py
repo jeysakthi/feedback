@@ -268,7 +268,11 @@ async def slack_interactivity(request: Request):
                     return {"text": "You have already submitted feedback for this thread."}
 
                 rating = state.get("rating")
-                comments = state.get("comments", "")
+                # comments = state.get("comments", "")
+                comments = ""
+                state_values = data.get("state", {}).get("values", {})
+                if "feedback_block" in state_values:
+                    comments = state_values["feedback_block"]["feedback_text"].get("value", "")
                 if not rating:
                     print("❌ Rating missing!")
                     return {"text": "Please select a rating before submitting."}
