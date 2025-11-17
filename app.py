@@ -177,71 +177,87 @@ def send_feedback_form(channel, thread_ts):
 # ---------------------------
 @app.post("/slack/interactivity")
 async def slack_interactivity(request: Request):
-    form_data = await request.form()
-    data = json.loads(form_data.get("payload"))
-    print("🔍 Interactivity Payload:", json.dumps(data, indent=2))
+    try:
+        print("tring the interactivity")
+        form_data = await request.form()
+        print("form: ",form_data)
+        payload = form_data.get("payload")
+        if not payload:
+            print("❌ No payload found in request.")
+            return {"error": "Missing payload"}
 
-    if data.get("type") == "block_actions":
-        action_id = data["actions"][0]["action_id"]
-        print(f"✅ Action ID: {action_id}")
+        data = json.loads(payload)
+        print("🔍 Full Interactivity Payload:", json.dumps(data, indent=2))
 
-        if action_id == "show_feedback_form":
-            channel_id = data.get("channel", {}).get("id")
-            thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
-            if not channel_id or not thread_ts:
-                print("❌ Missing channel_id or thread_ts in payload:", data)
-                return {"text": "Error: Missing context"}
-            print(f"✅ Yes button clicked. Channel: {channel_id}, Thread TS: {thread_ts}")
-            send_feedback_form(channel_id, thread_ts)
+        if data.get("type") == "block_actions":
+            action_id = data["actions"][0].get("action_id")
+            print(f"✅ Action ID: {action_id}")
 
-        elif action_id == "rating_select":
-            user_id = data.get("user", {}).get("id")
-            rating = data["actions"][0].get("selected_option", {}).get("value")
-            if user_id and rating:
-                user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
-                user_feedback_state[user_id]["rating"] = rating
-                print(f"✅ Rating selected: {rating}")
+            # Handle Yes button click
+            if action_id == "show_feedback_form":
+                channel_id = data.get("channel", {}).get("id")
+                thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
+                if not channel_id or not thread_ts:
+                    print("❌ Missing channel_id or thread_ts in payload:", data)
+                    return {"text": "Error: Missing context"}
+                print(f"✅ Yes button clicked. Channel: {channel_id}, Thread TS: {thread_ts}")
+                send_feedback_form(channel_id, thread_ts)
 
-        elif action_id == "feedback_text":
-            user_id = data.get("user", {}).get("id")
-            feedback_text = data["actions"][0].get("value", "")
-            if user_id:
-                user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
-                user_feedback_state[user_id]["comments"] = feedback_text
-                print(f"✅ Feedback text entered: {feedback_text}")
+            # Handle rating selection
+            elif action_id == "rating_select":
+                user_id = data.get("user", {}).get("id")
+                rating = data["actions"][0].get("selected_option", {}).get("value")
+                if user_id and rating:
+                    user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
+                    user_feedback_state[user_id]["rating"] = rating
+                    print(f"✅ Rating selected: {rating}")
 
-        elif action_id == "submit_feedback":
-            user_id = data.get("user", {}).get("id")
-            channel_id = data.get("channel", {}).get("id")
-            thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
-            state = user_feedback_state.get(user_id, {})
-            rating = state.get("rating")
-            comments = state.get("comments", "")
-            if not rating:
-                print("❌ Rating missing!")
-                return {"text": "Please select a rating before submitting."}
+            # Handle feedback text input
+            elif action_id == "feedback_text":
+                user_id = data.get("user", {}).get("id")
+                feedback_text = data["actions"][0].get("value", "")
+                if user_id:
+                    user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
+                    user_feedback_state[user_id]["comments"] = feedback_text
+                    print(f"✅ Feedback text entered: {feedback_text}")
 
-            user_name = get_user_name(user_id)
-            channel_name = get_channel_name(channel_id)
-            timestamp = time.time()
+            # Handle submit button
+            elif action_id == "submit_feedback":
+                user_id = data.get("user", {}).get("id")
+                channel_id = data.get("channel", {}).get("id")
+                thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
+                state = user_feedback_state.get(user_id, {})
+                rating = state.get("rating")
+                comments = state.get("comments", "")
+                if not rating:
+                    print("❌ Rating missing!")
+                    return {"text": "Please select a rating before submitting."}
 
-            feedback_data = {
-                "channel_name": channel_name,
-                "channel_id": channel_id,
-                "user_id": user_id,
-                "user_name": user_name,
-                "thread_ts": thread_ts,
-                "rating": rating,
-                "comments": comments,
-                "timestamp": timestamp
-            }
-            print("✅ Final Feedback Data:", feedback_data)
+                user_name = get_user_name(user_id)
+                channel_name = get_channel_name(channel_id)
+                timestamp = time.time()
 
-            # Use your deployed URL here
-            requests.post("https://feedback-jeysakthi1140-p6js52a9.leapcell.dev/feedback", json=feedback_data)
-            return {"text": "Thank you for your feedback!"}
+                feedback_data = {
+                    "channel_name": channel_name,
+                    "channel_id": channel_id,
+                    "user_id": user_id,
+                    "user_name": user_name,
+                    "thread_ts": thread_ts,
+                    "rating": rating,
+                    "comments": comments,
+                    "timestamp": timestamp
+                }
+                print("✅ Final Feedback Data:", feedback_data)
 
-    return {"status": "ok"}
+                # Post to deployed feedback endpoint
+                requests.post("https://feedback-jeysakthi1140-p6js52a9.leapcell.dev/feedback", json=feedback_data)
+                return {"text": "Thank you for your feedback!"}
+
+        return {"status": "ok"}
+
+    except Exception as e:
+        print("❌ Exception in /slack/interactivity:", str(e))
+        return {"error": "Internal Server Error"}
 # ---------------------------
 # Run FastAPI
 # ---------------------------
