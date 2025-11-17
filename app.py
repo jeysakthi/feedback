@@ -144,12 +144,12 @@ def send_feedback_form(channel, thread_ts, user_id):
         "blocks": [
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "*Rate your experience (1-5):*"},
+                "text": {"type": "mrkdwn", "text": "*Rate your experience (1-10):*"},
                 "accessory": {
                     "type": "static_select",
                     "action_id": "rating_select",
                     "placeholder": {"type": "plain_text", "text": "Select a rating"},
-                    "options": [{"text": {"type": "plain_text", "text": str(i)}, "value": str(i)} for i in range(1, 6)]
+                    "options": [{"text": {"type": "plain_text", "text": str(i)}, "value": str(i)} for i in range(1, 11)]
                 }
             },
             {
@@ -185,9 +185,9 @@ def send_feedback_form(channel, thread_ts, user_id):
         print(f"✅ Captured form message ts: {form_ts}")
 
 # ---------------------------
-# Update form & thank you
+# Update form with personalized thank you
 # ---------------------------
-def update_feedback_form(channel, ts):
+def update_feedback_form(channel, ts, user_name):
     url = "https://slack.com/api/chat.update"
     payload = {
         "channel": channel,
@@ -196,21 +196,11 @@ def update_feedback_form(channel, ts):
         "blocks": [
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "Thank you! Your feedback has been recorded."}
+                "text": {"type": "mrkdwn", "text": f"Thank you, *{user_name}*! Your feedback has been recorded."}
             }
         ]
     }
     print(f"✅ Updating feedback form for channel {channel}, ts {ts}")
-    send_slack_message(url, payload)
-
-def send_thank_you(channel, thread_ts):
-    url = "https://slack.com/api/chat.postMessage"
-    payload = {
-        "channel": channel,
-        "thread_ts": thread_ts,
-        "text": "✅ Thank you for your feedback!"
-    }
-    print(f"✅ Sending thank-you message to channel {channel}, thread {thread_ts}")
     send_slack_message(url, payload)
 
 # ---------------------------
@@ -234,15 +224,23 @@ async def slack_interactivity(request: Request):
             action_id = data["actions"][0].get("action_id")
             print(f"✅ Action ID: {action_id}")
 
+            user_id = data.get("user", {}).get("id")
+            state = user_feedback_state.get(user_id, {})
+
             if action_id == "show_feedback_form":
+                if state.get("submitted"):
+                    print("❌ User already submitted feedback, ignoring Yes click.")
+                    return {"text": "You have already submitted feedback for this thread."}
+
                 channel_id = data.get("channel", {}).get("id")
                 thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
-                user_id = data.get("user", {}).get("id")
-                print(f"✅ Yes button clicked. Channel: {channel_id}, Thread TS: {thread_ts}")
+                user_name = get_user_name(user_id)
+                user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
+                user_feedback_state[user_id]["user_name"] = user_name
+                print(f"✅ Yes button clicked by {user_name}. Channel: {channel_id}, Thread TS: {thread_ts}")
                 send_feedback_form(channel_id, thread_ts, user_id)
 
             elif action_id == "rating_select":
-                user_id = data.get("user", {}).get("id")
                 rating = data["actions"][0].get("selected_option", {}).get("value")
                 if user_id and rating:
                     user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
@@ -250,7 +248,6 @@ async def slack_interactivity(request: Request):
                     print(f"✅ Rating selected: {rating}")
 
             elif action_id == "feedback_text":
-                user_id = data.get("user", {}).get("id")
                 feedback_text = data["actions"][0].get("value", "")
                 if user_id:
                     user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
@@ -258,28 +255,25 @@ async def slack_interactivity(request: Request):
                     print(f"✅ Feedback text entered: {feedback_text}")
 
             elif action_id == "submit_feedback":
-                user_id = data.get("user", {}).get("id")
                 channel_id = data.get("channel", {}).get("id")
                 thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
-                state = user_feedback_state.get(user_id, {})
 
                 if state.get("submitted"):
                     print("❌ Duplicate submission detected!")
                     return {"text": "You have already submitted feedback for this thread."}
 
                 rating = state.get("rating")
-                # comments = state.get("comments", "")
                 comments = ""
                 state_values = data.get("state", {}).get("values", {})
                 if "feedback_block" in state_values:
                     comments = state_values["feedback_block"]["feedback_text"].get("value", "")
+
                 if not rating:
                     print("❌ Rating missing!")
                     return {"text": "Please select a rating before submitting."}
 
                 state["submitted"] = True
-
-                user_name = get_user_name(user_id)
+                user_name = state.get("user_name") or get_user_name(user_id)
                 channel_name = get_channel_name(channel_id)
                 timestamp = time.time()
 
@@ -295,18 +289,14 @@ async def slack_interactivity(request: Request):
                 }
                 print("✅ Final Feedback Data:", feedback_data)
 
-                # Store in memory and send to external API
                 feedback_store.append(feedback_data)
                 requests.post("https://feedback-jeysakthi1140-p6js52a9.leapcell.dev/feedback", json=feedback_data)
 
-                # Update form using captured ts
                 form_ts = state.get("form_ts")
                 if form_ts:
-                    update_feedback_form(channel_id, form_ts)
+                    update_feedback_form(channel_id, form_ts, user_name)
                 else:
                     print("❌ No form_ts found, cannot update form message!")
-
-                send_thank_you(channel_id, thread_ts)
 
                 return {"text": "Thank you for your feedback!"}
 
