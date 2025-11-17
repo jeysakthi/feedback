@@ -117,54 +117,117 @@ async def slack_events(request: Request):
             print(f"✅ Message received: {user_text}")
             print(f"Channel ID: {channel_id}, User ID: {user_id}, Thread TS: {thread_ts}, Timestamp: {timestamp}")
 
-            # Extract rating using regex
-            rating_match = re.search(r"Rating:\s*(\d+)", user_text)
-            rating = rating_match.group(1) if rating_match else None
-            print(f"Extracted Rating: {rating}")
-
-            if rating:
-                print("✅ Rating found, fetching user and channel info...")
-                user_name = get_user_name(user_id)
-                channel_name = get_channel_name(channel_id)
-
-                feedback_data = {
-                    "channel_name": channel_name,
-                    "channel_id": channel_id,
-                    "user_id": user_id,
-                    "user_name": user_name,
-                    "thread_ts": thread_ts,
-                    "rating": rating,
-                    "timestamp": timestamp
-                }
-                print(f"Final Feedback Data: {feedback_data}")
-
-                try:
-                    response = requests.post("http://localhost:5001/feedback", json=feedback_data)
-                    print(f"✅ Feedback POST Response: {response.status_code} {response.text}")
-                except Exception as e:
-                    print(f"❌ Error posting feedback: {e}")
-
-                # Reply to Slack
-                post_message(channel_id, f"Thanks for your rating of {rating}!", thread_ts)
+            # If message contains "This issue is resolved", send feedback button
+            if "This issue is resolved" in user_text:
+                print("✅ Trigger phrase detected, sending feedback button...")
+                send_feedback_button(channel_id, thread_ts)
 
     return {"status": "ok"}
 
 # ---------------------------
-# Post message to Slack
+# Send feedback button
 # ---------------------------
-def post_message(channel, text, thread_ts=None):
-    print(f"🔍 Posting message to Slack: {text}")
+def send_feedback_button(channel, thread_ts):
+    print(f"🔍 Sending feedback button to channel: {channel}, thread: {thread_ts}")
     url = "https://slack.com/api/chat.postMessage"
-    headers = {
-        "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
-        "Content-Type": "application/json"
+    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"}
+    payload = {
+        "channel": channel,
+        "thread_ts": thread_ts,
+        "text": "Would you like to submit feedback?",
+        "blocks": [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "Would you like to submit feedback?"},
+                "accessory": {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Submit Feedback"},
+                    "action_id": "open_feedback_form"
+                }
+            }
+        ]
     }
-    payload = {"channel": channel, "text": text}
-    if thread_ts:
-        payload["thread_ts"] = thread_ts
-    print(f"Payload: {payload}")
     response = requests.post(url, headers=headers, json=payload)
-    print(f"✅ Slack response: {response.status_code} {response.text}")
+    print(f"✅ Button Response: {response.status_code} {response.text}")
+
+# ---------------------------
+# Interactivity endpoint
+# ---------------------------
+@app.post("/slack/interactivity")
+async def slack_interactivity(request: Request):
+    print("🔍 Interactivity payload received...")
+    form_data = await request.form()
+    data = json.loads(form_data.get("payload"))
+    print(f"Interactivity Payload: {data}")
+
+    if data.get("type") == "block_actions":
+        trigger_id = data.get("trigger_id")
+        channel_id = data["channel"]["id"]
+        thread_ts = data["message"]["ts"]
+        print("✅ Button clicked, opening modal...")
+        open_feedback_modal(trigger_id, channel_id, thread_ts)
+
+    elif data.get("type") == "view_submission":
+        print("✅ Modal submitted, processing feedback...")
+        values = data["view"]["state"]["values"]
+        rating = values["rating_block"]["rating_input"]["value"]
+        comments = values["comments_block"]["comments_input"]["value"] if "comments_block" in values else ""
+        channel_id, thread_ts = data["view"]["private_metadata"].split("|")
+        user_id = data["user"]["id"]
+        user_name = get_user_name(user_id)
+        channel_name = get_channel_name(channel_id)
+        timestamp = time.time()
+
+        feedback_data = {
+            "channel_name": channel_name,
+            "channel_id": channel_id,
+            "user_id": user_id,
+            "user_name": user_name,
+            "thread_ts": thread_ts,
+            "rating": rating,
+            "comments": comments,
+            "timestamp": timestamp
+        }
+        print(f"Final Feedback Data: {feedback_data}")
+        requests.post("http://localhost:5001/feedback", json=feedback_data)
+        return {"response_action": "clear"}  # Close modal
+
+    return {"status": "ok"}
+
+# ---------------------------
+# Open modal
+# ---------------------------
+def open_feedback_modal(trigger_id, channel_id, thread_ts):
+    print("🔍 Opening feedback modal...")
+    url = "https://slack.com/api/views.open"
+    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"}
+    payload = {
+        "trigger_id": trigger_id,
+        "view": {
+            "type": "modal",
+            "callback_id": "feedback_form",
+            "private_metadata": f"{channel_id}|{thread_ts}",
+            "title": {"type": "plain_text", "text": "Submit Feedback"},
+            "submit": {"type": "plain_text", "text": "Submit"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "rating_block",
+                    "element": {"type": "plain_text_input", "action_id": "rating_input"},
+                    "label": {"type": "plain_text", "text": "Rating (1-10)"}
+                },
+                {
+                    "type": "input",
+                    "block_id": "comments_block",
+                    "optional": True,
+                    "element": {"type": "plain_text_input", "action_id": "comments_input"},
+                    "label": {"type": "plain_text", "text": "Feedback Comments"}
+                }
+            ]
+        }
+    }
+    response = requests.post(url, headers=headers, json=payload)
+    print(f"✅ Modal Response: {response.status_code} {response.text}")
 
 # ---------------------------
 # Run FastAPI
