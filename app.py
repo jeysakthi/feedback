@@ -189,7 +189,7 @@ async def slack_interactivity(request: Request):
             "timestamp": timestamp
         }
         print(f"Final Feedback Data: {feedback_data}")
-        requests.post("http://localhost:5001/feedback", json=feedback_data)
+        requests.post("https://feedback-jeysakthi1140-p6js52a9.leapcell.dev/feedback", json=feedback_data)
         return {"response_action": "clear"}  # Close modal
 
     return {"status": "ok"}
