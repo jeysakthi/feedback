@@ -101,7 +101,7 @@ async def slack_events(request: Request):
             channel_id = event.get("channel", "")
             thread_ts = event.get("thread_ts", event.get("ts", ""))
 
-            if "This issue is resolved" in user_text:
+            if "The issue you reported has been successfully addressed" in user_text:
                 print("✅ Trigger phrase detected, sending Yes button...")
                 send_yes_button(channel_id, thread_ts)
 
