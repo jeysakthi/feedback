@@ -178,8 +178,9 @@ async def slack_events(request: Request):
                 session_id = extract_session_id(user_text)
                 user_feedback_state["jira_id"] = jira_id
                 user_feedback_state["session_id"] = session_id
+                user_name = get_user_name(event.get("user"))
                 print(f"✅ Extracted JIRA ID: {jira_id}, Session ID: {session_id}")
-                send_yes_button(channel_id, thread_ts)
+                send_yes_button(channel_id, thread_ts,user_name)
 
     return {"status": "ok"}
 
@@ -201,11 +202,11 @@ def send_yes_button(channel, thread_ts):
     payload = {
         "channel": channel,
         "thread_ts": thread_ts,
-        "text": "We value your input! Would you like to share your feedback on this resolution?",
+        "text": "Hi {user_name},",
         "blocks": [
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": ""},
+                "text": {"type": "mrkdwn", "text": "Hi *{user_name}*,"},
                 "accessory": {
                     "type": "button",
                     "text": {"type": "plain_text", "text": "Click to Submit your Feedback!"},
