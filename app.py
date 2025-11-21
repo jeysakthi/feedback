@@ -204,11 +204,11 @@ def send_yes_button(channel, thread_ts, user_name):
     payload = {
         "channel": channel,
         "thread_ts": thread_ts,
-        "text": f"Hi {user_name}",
+        "text": "🎯",
         "blocks": [
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f"Hi *{user_name}*"},
+                "text": {"type": "mrkdwn", "text": "🎯"},
                 "accessory": {
                     "type": "button",
                     "text": {"type": "plain_text", "text": "Click to Submit Your Feedback"},
@@ -218,7 +218,7 @@ def send_yes_button(channel, thread_ts, user_name):
             }
         ]
     }
-    print(f"✅ Sending Yes button to {user_name} in channel {channel}, thread {thread_ts}")
+    print(f"✅ Sending Yes button with emoji to channel {channel}, thread {thread_ts}")
     send_slack_message(url, payload)
 
 # ---------------------------
