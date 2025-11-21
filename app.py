@@ -27,8 +27,7 @@ user_feedback_state = {}
 # DB Helpers
 # ---------------------------
 def get_db_connection():
-    conn = psycopg2.connect(DB_CONN_STR)
-    return conn
+    return psycopg2.connect(DB_CONN_STR)
 
 def create_feedback_table():
     conn = get_db_connection()
@@ -127,6 +126,19 @@ def send_slack_message(url, payload):
     return resp.json()
 
 # ---------------------------
+# Extraction helpers
+# ---------------------------
+def extract_jira_id(text):
+    clean_text = " ".join(text.split())  # Normalize spaces/newlines
+    match = re.search(r"JIRA ID:\s*([A-Z0-9-]+)", clean_text)
+    return match.group(1).rstrip(".") if match else None
+
+def extract_session_id(text):
+    clean_text = " ".join(text.split())
+    match = re.search(r"reference number.*?:\s*([a-f0-9-]+)", clean_text)
+    return match.group(1) if match else None
+
+# ---------------------------
 # Feedback endpoints
 # ---------------------------
 @app.get("/feedback")
@@ -178,43 +190,35 @@ async def slack_events(request: Request):
                 session_id = extract_session_id(user_text)
                 user_feedback_state["jira_id"] = jira_id
                 user_feedback_state["session_id"] = session_id
-                print(f"✅ Extracted JIRA ID: {jira_id}, Session ID: {session_id}")
-                send_yes_button(channel_id, thread_ts)
+                user_name = get_user_name(event.get("user"))
+                print(f"✅ Extracted JIRA ID: {jira_id}, Session ID: {session_id}, User: {user_name}")
+                send_yes_button(channel_id, thread_ts, user_name)
 
     return {"status": "ok"}
-
-def extract_jira_id(text):
-    # Normalize text
-    clean_text = " ".join(text.split())
-    match = re.search(r"JIRA ID:\s*([A-Z0-9-]+)", clean_text)
-    return match.group(1) if match else None
-
-def extract_session_id(text):
-    match = re.search(r"reference number.*?:\s*([a-f0-9-]+)", text)
-    return match.group(1) if match else None
 
 # ---------------------------
 # Send Yes button
 # ---------------------------
-def send_yes_button(channel, thread_ts):
+def send_yes_button(channel, thread_ts, user_name):
     url = "https://slack.com/api/chat.postMessage"
     payload = {
         "channel": channel,
         "thread_ts": thread_ts,
-        "text": "We value your input! Would you like to share your feedback on this resolution?",
+        "text": f"Hi {user_name}",
         "blocks": [
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": ""},
+                "text": {"type": "mrkdwn", "text": f"Hi *{user_name}*"},
                 "accessory": {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Click to Submit your Feedback!"},
+                    "text": {"type": "plain_text", "text": "Click to Submit Your Feedback"},
                     "style": "primary",
                     "action_id": "show_feedback_form"
                 }
             }
         ]
     }
+    print(f"✅ Sending Yes button to {user_name} in channel {channel}, thread {thread_ts}")
     send_slack_message(url, payload)
 
 # ---------------------------
