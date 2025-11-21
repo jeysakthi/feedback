@@ -184,7 +184,9 @@ async def slack_events(request: Request):
     return {"status": "ok"}
 
 def extract_jira_id(text):
-    match = re.search(r"JIRA ID:\s*([A-Z0-9-]+)", text)
+    # Normalize text
+    clean_text = " ".join(text.split())
+    match = re.search(r"JIRA ID:\s*([A-Z0-9-]+)", clean_text)
     return match.group(1) if match else None
 
 def extract_session_id(text):
@@ -203,10 +205,10 @@ def send_yes_button(channel, thread_ts):
         "blocks": [
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "We value your input! Would you like to share your feedback on this resolution?"},
+                "text": {"type": "mrkdwn", "text": ""},
                 "accessory": {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Yes"},
+                    "text": {"type": "plain_text", "text": "Click to Submit your Feedback!"},
                     "style": "primary",
                     "action_id": "show_feedback_form"
                 }
@@ -306,9 +308,16 @@ async def slack_interactivity(request: Request):
             if action_id == "show_feedback_form":
                 channel_id = data.get("channel", {}).get("id")
                 thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
+
+                # ✅ Prevent duplicate form display
+                if thread_ts in state.get("submitted_threads", []):
+                    print("❌ User already submitted feedback for this thread.")
+                    return {"text": "You have already submitted feedback for this thread. Thank you!"}
+
                 user_name = get_user_name(user_id)
                 user_feedback_state[user_id] = user_feedback_state.get(user_id, {})
                 user_feedback_state[user_id]["user_name"] = user_name
+                print(f"✅ Yes button clicked by {user_name}. Channel: {channel_id}, Thread TS: {thread_ts}")
                 send_feedback_form(channel_id, thread_ts, user_id)
 
             elif action_id == "rating_select":
@@ -330,6 +339,9 @@ async def slack_interactivity(request: Request):
                 comments = data.get("state", {}).get("values", {}).get("feedback_block", {}).get("feedback_text", {}).get("value", "")
                 if not rating:
                     return {"text": "Please select a rating before submitting."}
+
+                # ✅ Mark this thread as submitted
+                state.setdefault("submitted_threads", []).append(thread_ts)
 
                 user_name = state.get("user_name") or get_user_name(user_id)
                 channel_name = get_channel_name(channel_id)
