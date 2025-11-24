@@ -128,13 +128,24 @@ def send_slack_message(url, payload):
 # ---------------------------
 # Extraction helpers
 # ---------------------------
+import re
+import html
+
 def extract_jira_id(text):
-    clean_text = " ".join(text.split())  # Normalize spaces/newlines
+    # Decode HTML entities (&gt; -> >)
+    clean_text = html.unescape(text)
+    # Remove markdown symbols like * and >
+    clean_text = re.sub(r"[*>]", "", clean_text)
+    # Normalize spaces
+    clean_text = " ".join(clean_text.split())
+    # Match JIRA ID
     match = re.search(r"JIRA ID:\s*([A-Z0-9-]+)", clean_text)
     return match.group(1).rstrip(".") if match else None
 
 def extract_session_id(text):
-    clean_text = " ".join(text.split())
+    clean_text = html.unescape(text)
+    clean_text = re.sub(r"[*>]", "", clean_text)
+    clean_text = " ".join(clean_text.split())
     match = re.search(r"reference number.*?:\s*([a-f0-9-]+)", clean_text)
     return match.group(1) if match else None
 
