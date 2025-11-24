@@ -162,6 +162,35 @@ async def get_feedback():
     print("✅ Returning formatted feedback:", feedback_list)
     return {"feedback": feedback_list}
 
+
+@app.get("/feedback/session/{session_id}")
+async def get_feedback_by_session(session_id: str):
+    print(f"✅ Fetching feedback for session_id: {session_id}")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM feedback WHERE session_id = %s;", (session_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    feedback_list = []
+    for row in rows:
+        feedback_list.append({
+            "id": row[0],
+            "channel_name": row[1],
+            "channel_id": row[2],
+            "user_id": row[3],
+            "user_name": row[4],
+            "thread_ts": row[5],
+            "rating": row[6],
+            "comments": row[7],
+            "jira_id": row[8],
+            "session_id": row[9],
+            "timestamp": row[10]
+        })
+
+    print(f"✅ Returning feedback for session_id {session_id}: {feedback_list}")
+    return {"feedback": feedback_list}
 # ---------------------------
 # Slack Events endpoint
 # ---------------------------
@@ -204,11 +233,11 @@ def send_yes_button(channel, thread_ts, user_name):
     payload = {
         "channel": channel,
         "thread_ts": thread_ts,
-        "text": "🎯",
+        "text": " ",
         "blocks": [
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "🎯"},
+                "text": {"type": "mrkdwn", "text": " "},
                 "accessory": {
                     "type": "button",
                     "text": {"type": "plain_text", "text": "Click to Submit Your Feedback"},
